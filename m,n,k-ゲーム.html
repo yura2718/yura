@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>m,n,k-ゲーム</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            background-color: #FDE2B5;
+            border: 2px solid #000;
+            user-select: none;
+        }
+
+        table td {
+            width: 50px;
+            height: 50px;
+            font-size: 30px;
+            border: 1px solid #222;
+            vertical-align: middle;
+            text-align: center;
+        }
+
+        /* 参考 https://magazine.techacademy.jp/magazine/29913 */
+        .construction {
+            list-style-type: none;
+        }
+
+        .construction ul {
+            margin: 0;
+            padding: 0;
+            list-style-type: none;
+
+        }
+
+        .construction ul {
+            position: relative;
+            /* margin-top: 1rem; */
+            margin-left: 50px;
+        }
+
+        .construction ul:before {
+            content: "";
+            display: block;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            border-left: 2px solid red;
+        }
+
+        .construction ul li {
+            position: relative;
+            margin: 0;
+            padding: 7px 30px;
+            /* padding: 0; */
+        }
+
+        .construction ul li:before {
+            content: "";
+            display: block;
+            position: absolute;
+            top: 15px;
+            left: 0;
+            width: 30px;
+            height: 0;
+            border-top: 2px solid blue;
+
+        }
+
+        .construction ul li:last-child:before {
+            top: 15px;
+            bottom: 0;
+            height: auto;
+            background-color: #fff;
+
+        }
+    </style>
+</head>
+
+<body>
+    <div style="display: flex;">
+        <div id="board" style="margin: 0 auto;"></div>
+    </div>
+    <div style="display: flex;">
+        <div id="record" style="margin: 0 auto;"></div>
+    </div>
+    <div style="display: flex;">
+        <div id="debuginfo" style="margin: 0 auto;"></div>
+    </div>
+    <div style="display: flex;">
+        <div id="gametree" style="margin: 0 auto;"></div>
+    </div>
+
+    <dialog id="win">
+        <p>あなたの勝ち</p>
+    </dialog>
+    <dialog id="lose">
+        <p>あなたの負け</p>
+    </dialog>
+    <dialog id="draw">
+        <p>引き分け</p>
+    </dialog>
+
+    <script>
+        // 勝ち・負け・引き分けダイアログ
+        const win = document.getElementById("win")
+        const lose = document.getElementById("lose")
+        const draw = document.getElementById("draw")
+        win.addEventListener("click", win.close)
+        lose.addEventListener("click", lose.close)
+        draw.addEventListener("click", draw.close)
+
+        // 所有者・土地種の一覧．"owner"をキーとして格納される．
+        const [PLAYER, COM, BADLANDS] = ["PLAYER", "COM", "BADLANDS"];
+        // 例 5x5, 長さ4, 深度4
+        const BOARD_WIDTH = 5; // 盤の横の大きさ
+        const BOARD_HEIGHT = 5; // 盤の縦の大きさ
+        const LENGTH = 4; // 石を並べる長さ
+        const DEPTH = 4; // 探索の深さ
+        const DEBUG = false // デバッグモードかどうか
+        const ALPHABETA = true // αβ法を使うか
+        const RECORD = true // 棋譜を採るか
+        const SHORTCIRCUIT = true // 詰みの場合に短絡手を許すかどうか
+        const FAST = true // ログの処理を省いた高速な関数を利用するか
+        let canOperate = true // 操作可能かどうか．COMの探索中は操作できない
+        let board = Array.from(new Array(BOARD_HEIGHT), () => Array.from(new Array(BOARD_WIDTH), () => ({ "soldier": null, "owner": null }))) // ゲームボード
+        // 荒野(BADLANDS)を設定する
+        for (let coordinate of []) {
+            board[coordinate[0]][coordinate[1]] = { "soldier": null, "owner": BADLANDS }
+        }
+        // 盤面を表示する
+        document.getElementById("board").innerHTML = boardHTML(board)
+
+        /*
+        盤面をhtmlにして返す
+        */
+        function boardHTML(board) {
+            let table = trtd => `<table>${trtd}</table>`;
+            let trtd = ""
+
+            board.forEach((row, y) => {
+                trtd += "<tr>";
+                row.forEach((e, x) => {
+                    if (e["owner"] === PLAYER) {
+                        trtd += `<td><font color="blue">${e["soldier"]}</font></td>`;
+                    } else if (e["owner"] === COM) {
+                        trtd += `<td><font color="red">${e["soldier"]}</font></td>`;
+                    } else if (e["owner"] === BADLANDS) {
+                        trtd += `<td style="background-color: black;"></td>`;
+                    } else {
+                        trtd += `<td onclick="if(canOperate) player(${x}, ${y});"></td>`
+                    }
+                })
+                trtd += "</tr>";
+            })
+
+            return table(trtd);
+        }
+
+        /*
+        石を置くことができる場所を配列として返す
+        */
+        function avairable(board) {
+            let coordinate = []
+            board.forEach((row, y) => {
+                row.forEach((block, x) => {
+                    if (block["owner"] === null) {
+                        coordinate.push({ "y": y, "x": x })
+                    }
+                })
+            })
+
+            return coordinate
+        }
+
+        function player(x, y) {
+
+            canOperate = false
+
+            // 石がすでに置かれているマスには石は置けない
+            if (board[y][x]["owner"] !== null) {
+                return 0
+            }
+
+            // 石を置く
+            board[y][x] = { "soldier": "o", "owner": PLAYER }
+
+            // 盤面UIを更新する
+            document.getElementById("board").innerHTML = boardHTML(board)
+
+            // 棋譜を採る
+            if (RECORD) {
+                document.getElementById("record").innerHTML +=
+                    `<font color="blue">YOU ${x}${String.fromCharCode(y + "A".charCodeAt())}</font><br>`
+            }
+
+            // 勝敗が決まった場合に知らせる
+            if (align(board, PLAYER, LENGTH)) {
+                win.showModal()
+                return 0
+            } else if (avairable(board).length === 0) {
+                draw.showModal()
+                return 0
+            }
+
+            // COMが手を探索する
+            FAST ? fastCompter() : compter()
+
+            canOperate = true
+        }
+
+        /*
+        無駄を省いて思考するコンピュータ
+        */
+        function fastCompter() {
+
+            let getMaxIndex = arr => arr.indexOf(Math.max(...arr)) // 最大値のインデックスを返す関数
+            let scores = [] // 子盤面のスコアを格納する配列
+            let isShortcircuit = false // 短絡手かどうか
+
+            // 計測開始
+            const start = performance.now()
+
+            // 子盤面を探索
+            for (let block of avairable(board)) {
+                scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], 1, Math.max(...scores)))
+            }
+
+            // 短絡手の実装
+            if (SHORTCIRCUIT && scores.every(score => score === scores[0])) {
+                isShortcircuit = true
+                scores = []
+                for (let block of avairable(board)) {
+                    scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], DEPTH, Math.max(...scores)))
+                }
+            }
+
+            // COMの手を選択
+            let goodCoodinate = avairable(board)[getMaxIndex(scores)]
+
+            // 石を置く
+            board[goodCoodinate["y"]][goodCoodinate["x"]] = { "soldier": "x", "owner": COM }
+
+            // 計測終了
+            const end = performance.now()
+
+            // 盤面UIを更新
+            document.getElementById("board").innerHTML = boardHTML(board)
+
+            // 棋譜を採る
+            if (RECORD) {
+                document.getElementById("record").innerHTML +=
+                    `<font color="red">COM ${goodCoodinate["x"]}${String.fromCharCode(goodCoodinate["y"] + "A".charCodeAt())}
+        ${(end - start).toFixed(2)}ms ${isShortcircuit ? "短絡手" : ""}</font><br>`
+            }
+
+            // 子盤面のスコア配列をコンソールに出力する
+            console.log(scores)
+
+            // 勝敗が決まった場合に知らせる
+            if (align(board, COM, LENGTH)) {
+                lose.showModal()
+                return 0
+            } else if (avairable(board).length === 0) {
+                draw.showModal()
+                return 0
+            }
+
+            // COMが探索するための想像コンピュータ
+            function imagedComupter(board, x, y, depth, parentMax) {
+
+                board[y][x] = { "soldier": "x", "owner": COM }
+                let blanks = avairable(board)
+                let scores = []
+
+                // 勝利条件を満たすとき
+                if (align(board, COM, LENGTH)) {
+                    return 1000 * (DEPTH - depth + 1)
+                }
+
+                // 探索の深さまたは全マスの埋まりを満たすとき
+                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
+
+                // 子盤面の探索
+                for (let block of blanks) {
+                    let score = imagedPlayer(structuredClone(board), block["x"], block["y"], depth + 1, Math.min(...scores))
+                    if (score <= parentMax && ALPHABETA) {
+                        // αカット
+                        return score
+                    } else {
+                        scores.push(score)
+                    }
+                }
+                return Math.min(...scores)
+            }
+
+            // COMが探索するための想像プレイヤー
+            function imagedPlayer(board, x, y, depth, parentMin) {
+
+                board[y][x] = { "soldier": "o", "owner": PLAYER }
+                let blanks = avairable(board)
+                let scores = []
+
+                // 勝利条件を満たすとき
+                if (align(board, PLAYER, LENGTH)) {
+                    return -1000 * (DEPTH - depth + 1)
+                }
+
+                // 探索の深さまたは全マスの埋まりを満たすとき
+                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
+
+                // 子盤面の探索
+                for (let block of blanks) {
+                    let score = imagedComupter(structuredClone(board), block["x"], block["y"], depth + 1, Math.max(...scores))
+                    if (parentMin <= score && ALPHABETA) {
+                        // βカット
+                        return score
+                    } else {
+                        scores.push(score)
+                    }
+                }
+                return Math.max(...scores)
+            }
+        }
+
+
+        /*
+        思考するコンピュータ
+        */
+        function compter() {
+
+            let gametree = `<ul class="construction"><li>${boardHTML(board)}` // ゲーム木を表現するHTMLを格納する
+            let getMaxIndex = arr => arr.indexOf(Math.max(...arr)) // 最大値のインデックスを返す関数
+            let scores = [] // 子盤面のスコアを格納する配列
+            let isShortcircuit = false // 短絡手かどうか
+
+            // 計測開始
+            const start = performance.now()
+
+            gametree += `<ul>`
+            // 子盤面を探索
+            for (let block of avairable(board)) {
+                scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], 1, Math.max(...scores)))
+            }
+            gametree += `</ul></li><ul>`
+
+            // 短絡手の実装
+            if (SHORTCIRCUIT && scores.every(score => score === scores[0])) {
+                isShortcircuit = true
+                scores = []
+                for (let block of avairable(board)) {
+                    scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], DEPTH, Math.max(...scores)))
+                }
+            }
+
+            // COMの手を選択
+            let goodCoodinate = avairable(board)[getMaxIndex(scores)]
+
+            // 石を置く
+            board[goodCoodinate["y"]][goodCoodinate["x"]] = { "soldier": "x", "owner": COM }
+
+            // 計測終了
+            const end = performance.now()
+
+            // 盤面UIを更新
+            document.getElementById("board").innerHTML = boardHTML(board)
+
+            // 棋譜を採る
+            if (RECORD) {
+                document.getElementById("record").innerHTML +=
+                    `<font color="red">COM ${goodCoodinate["x"]}${String.fromCharCode(goodCoodinate["y"] + "A".charCodeAt())}
+                    ${(end - start).toFixed(2)}ms ${isShortcircuit ? "短絡手" : ""}</font><br>`
+            }
+
+            // ゲーム木を表示する
+            if (DEBUG) {
+                document.getElementById("gametree").innerHTML = gametree
+            }
+            // 子盤面のスコア配列をコンソールに出力する
+            console.log(scores)
+
+            // 勝敗が決まった場合に知らせる
+            if (align(board, COM, LENGTH)) {
+                alert("あなたの 負け")
+                return 0
+            } else if (avairable(board).length === 0) {
+                alert("引き分け")
+                return 0
+            }
+
+            // COMが探索するための想像コンピュータ
+            function imagedComupter(board, x, y, depth, parentMax) {
+
+                board[y][x] = { "soldier": "x", "owner": COM }
+                let blanks = avairable(board)
+                let scores = []
+
+                // 勝利条件を満たすとき
+                if (align(board, COM, LENGTH)) {
+                    gametree += `<li>${boardHTML(board)}COM勝利</li>`
+                    return 1000 * (DEPTH - depth + 1)
+                }
+
+                // 探索の深さまたは全マスの埋まりを満たすとき
+                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
+
+                gametree += `<li>${boardHTML(board)}</li>`
+                gametree += `<ul>`
+
+                // 子盤面の探索
+                for (let block of blanks) {
+                    let score = imagedPlayer(structuredClone(board), block["x"], block["y"], depth + 1, Math.min(...scores))
+                    if (score <= parentMax && ALPHABETA) {
+                        // αカット
+                        gametree += `</ul>`
+                        return score
+                    } else {
+                        scores.push(score)
+                    }
+                }
+                gametree += `</ul>`
+                return Math.min(...scores)
+            }
+
+            // COMが探索するための想像プレイヤー
+            function imagedPlayer(board, x, y, depth, parentMin) {
+
+                board[y][x] = { "soldier": "o", "owner": PLAYER }
+                let blanks = avairable(board)
+                let scores = []
+
+                // 勝利条件を満たすとき
+                if (align(board, PLAYER, LENGTH)) {
+                    gametree += `<li>${boardHTML(board)}PLAYER勝利</li>`
+                    return -1000 * (DEPTH - depth + 1)
+                }
+
+                // 探索の深さまたは全マスの埋まりを満たすとき
+                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
+
+                gametree += `<li>${boardHTML(board)}</li>`
+                gametree += `<ul>`
+                // 子盤面の探索
+                for (let block of blanks) {
+                    let score = imagedComupter(structuredClone(board), block["x"], block["y"], depth + 1, Math.max(...scores))
+                    if (parentMin <= score && ALPHABETA) {
+                        // βカット
+                        gametree += `</ul>`
+                        return score
+                    } else {
+                        scores.push(score)
+                    }
+                }
+                gametree += `</ul>`
+                return Math.max(...scores)
+            }
+        }
+
+        /*
+        盤面中でlen個以上並んでいるchallengerの個数を返す
+        */
+        function align(board, challenger, len) {
+
+            let countSequence = (arr, n) => {
+                let maxLength = 0
+                let nowLength = 0
+                for (let item of arr) {
+                    if (item["owner"] === n) {
+                        nowLength += 1
+                        if (maxLength < nowLength) {
+                            maxLength = nowLength
+                        }
+                    } else {
+                        nowLength = 0
+                    }
+                }
+                return maxLength
+            }
+
+
+
+            let combination = 0
+
+            // 横の揃い
+            for (let row of board) {
+                if (len <= countSequence(row, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // 縦の揃い
+            let transpose = arr2d => {
+                t = Array.from(new Array(arr2d[0].length), () => Array.from(new Array(arr2d.length), () => null))
+                arr2d.forEach((row, y) => {
+                    row.forEach((item, x) => {
+                        t[x][y] = item
+                    })
+                })
+                return t
+            }
+
+            for (let col of transpose(board)) {
+                if (len <= countSequence(col, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // 斜めに存在している要素を切り出す．
+            let diag = array2d => {
+
+                // 配列の左下から左上を経由して右上に向かって存在する要素番号を返す．
+                // 返す要素番号はギリシア文字のΓ(ガンマの大文字)の上にある位置
+                let gammaIndex = () => {
+                    return [...Array(BOARD_HEIGHT - 1).keys()].map(i => [0, BOARD_HEIGHT - 1 - i]).concat([...Array(BOARD_WIDTH).keys()].map(i => [i, 0]))
+                }
+
+                let diagFrom = (array2d, x, y) => {
+                    diagArray = []
+                    while (x < BOARD_WIDTH && y < BOARD_HEIGHT) {
+                        diagArray.push(array2d[y][x])
+                        x++; y++
+                    }
+                    return diagArray
+                }
+
+                let diagedArray = []
+                for (let index of gammaIndex()) {
+                    diagedArray.push(diagFrom(array2d, index[0], index[1]))
+                }
+
+                return diagedArray
+            }
+
+            // /字斜めの揃い
+            for (let d of diag(board)) {
+                if (len <= countSequence(d, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // \字斜めの揃い
+            for (let d of diag(structuredClone(board).map(row => row.reverse()))) {
+                if (len <= countSequence(d, challenger)) {
+                    combination += 1
+                }
+            }
+
+
+            return combination
+        }
+
+        /*
+        盤面においてchallengerのリーチ(len個並んだ状態)の個数を返す
+        */
+        function reach(board, challenger, len) {
+
+            let countSequence = (arr, challenger) => {
+                let maxLength = 0
+                let nowLength = 0
+                let isOneNull = false
+                let isChallengerReach = false
+                for (let item of arr) {
+                    if (item["owner"] === challenger) {
+                        nowLength += 1
+                        isChallengerReach = true
+                        isOneNull = false
+                        if (isChallengerReach && maxLength < nowLength) {
+                            maxLength = nowLength
+                        }
+                    } else if (item["owner"] === null && isOneNull === false) {
+                        nowLength += 1
+                        isOneNull = true
+                        if (isChallengerReach && maxLength < nowLength) {
+                            maxLength = nowLength
+                        }
+                    } else {
+                        nowLength = 0
+                        isOneNull = false
+                        isChallengerReach = false
+                    }
+                }
+                return maxLength
+            }
+
+            let combination = 0
+
+            // 横の揃い
+            for (let row of board) {
+                if (len <= countSequence(row, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // 縦の揃い
+            let transpose = arr2d => {
+                t = Array.from(new Array(arr2d[0].length), () => Array.from(new Array(arr2d.length), () => null))
+                arr2d.forEach((row, y) => {
+                    row.forEach((item, x) => {
+                        t[x][y] = item
+                    })
+                })
+                return t
+            }
+
+            for (let col of transpose(board)) {
+                if (len <= countSequence(col, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // 斜めに存在している要素を切り出す．
+            let diag = array2d => {
+
+                // 配列の左下から左上を経由して右上に向かって存在する要素番号を返す．
+                // 返す要素番号はギリシア文字のΓ(ガンマの大文字)の上にある位置
+                let gammaIndex = () => {
+                    return [...Array(BOARD_HEIGHT - 1).keys()].map(i => [0, BOARD_HEIGHT - 1 - i]).concat([...Array(BOARD_WIDTH).keys()].map(i => [i, 0]))
+                }
+
+                let diagFrom = (array2d, x, y) => {
+                    diagArray = []
+                    while (x < BOARD_WIDTH && y < BOARD_HEIGHT) {
+                        diagArray.push(array2d[y][x])
+                        x++; y++
+                    }
+                    return diagArray
+                }
+
+                let diagedArray = []
+                for (let index of gammaIndex()) {
+                    diagedArray.push(diagFrom(array2d, index[0], index[1]))
+                }
+
+                return diagedArray
+            }
+
+            // /字斜めの揃い
+            for (let d of diag(board)) {
+                if (len <= countSequence(d, challenger)) {
+                    combination += 1
+                }
+            }
+
+            // \字斜めの揃い
+            for (let d of diag(structuredClone(board).map(row => row.reverse()))) {
+                if (len <= countSequence(d, challenger)) {
+                    combination += 1
+                }
+            }
+
+
+            return combination
+        }
+        /* COMにとってどれほど有利か */
+        function evaluate(board) {
+            return reach(board, COM, LENGTH - 1) * 10 - reach(board, PLAYER, LENGTH - 1) * 10
+        }
+    </script>
+</body>
+
+</html>
