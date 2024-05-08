@@ -109,34 +109,51 @@
         const win = document.getElementById("win")
         const lose = document.getElementById("lose")
         const draw = document.getElementById("draw")
+
+        // ダイアログが出ているときに任意の場所でクリックするとダイアログは閉じる
         win.addEventListener("click", win.close)
         lose.addEventListener("click", lose.close)
         draw.addEventListener("click", draw.close)
 
         // 所有者・土地種の一覧．"owner"をキーとして格納される．
         const [PLAYER, COM, BADLANDS] = ["PLAYER", "COM", "BADLANDS"];
+
         // 例 5x5, 長さ4, 深度4
-        const BOARD_WIDTH = 5; // 盤の横の大きさ
-        const BOARD_HEIGHT = 5; // 盤の縦の大きさ
-        const LENGTH = 4; // 石を並べる長さ
-        const DEPTH = 4; // 探索の深さ
-        const DEBUG = false // デバッグモードかどうか
-        const ALPHABETA = true // αβ法を使うか
-        const RECORD = true // 棋譜を採るか
-        const SHORTCIRCUIT = true // 詰みの場合に短絡手を許すかどうか
-        const FAST = true // ログの処理を省いた高速な関数を利用するか
-        let canOperate = true // 操作可能かどうか．COMの探索中は操作できない
-        let board = Array.from(new Array(BOARD_HEIGHT), () => Array.from(new Array(BOARD_WIDTH), () => ({ "soldier": null, "owner": null }))) // ゲームボード
+        const BOARD_WIDTH = 5       // 盤の横の大きさ
+        const BOARD_HEIGHT = 5      // 盤の縦の大きさ
+        const LENGTH = 4            // 石を並べる長さ
+        const DEPTH = 4             // 探索の深さ
+        const DEBUG = false         // デバッグモードかどうか
+        const ALPHABETA = true      // αβ法を使うか
+        const RECORD = true         // 棋譜を採るか
+        const SHORTCIRCUIT = true   // 詰みの場合に短絡手を許すかどうか
+        const COMPTER_FIRST = false // COMが先手になる
+        let canOperate = true       // 操作可能かどうか．COMの探索中は操作できない
+
+        // 盤面を表現する配列
+        let board = Array.from(new Array(BOARD_HEIGHT),
+            () => Array.from(new Array(BOARD_WIDTH), () => ({ "soldier": null, "owner": null }))
+        )
+
         // 荒野(BADLANDS)を設定する
         for (let coordinate of []) {
             board[coordinate[0]][coordinate[1]] = { "soldier": null, "owner": BADLANDS }
         }
+
         // 盤面を表示する
         document.getElementById("board").innerHTML = boardHTML(board)
 
-        /*
-        盤面をhtmlにして返す
-        */
+        // COM先手を設定している場合
+        if (COMPTER_FIRST) {
+            compter()
+        }
+
+
+        /**
+         * 盤面のHTMLを得る
+         *
+         * @param {} board 盤面の表現する配列
+         */
         function boardHTML(board) {
             let table = trtd => `<table>${trtd}</table>`;
             let trtd = ""
@@ -160,9 +177,11 @@
             return table(trtd);
         }
 
-        /*
-        石を置くことができる場所を配列として返す
-        */
+        /**
+         * 石を置くことができる場所を配列として返す
+         *
+         * @param {*} board 盤面を表現する配列
+         */
         function avairable(board) {
             let coordinate = []
             board.forEach((row, y) => {
@@ -176,6 +195,12 @@
             return coordinate
         }
 
+        /**
+         * プレイヤーが石を置くためのコールバック関数
+         *
+         * @param {*} x 石を置くマスのx座標
+         * @param {*} y 石を置くマスのy座標
+         */
         function player(x, y) {
 
             canOperate = false
@@ -207,145 +232,31 @@
             }
 
             // COMが手を探索する
-            FAST ? fastCompter() : compter()
+            compter()
 
             canOperate = true
         }
 
-        /*
-        無駄を省いて思考するコンピュータ
-        */
-        function fastCompter() {
-
-            let getMaxIndex = arr => arr.indexOf(Math.max(...arr)) // 最大値のインデックスを返す関数
-            let scores = [] // 子盤面のスコアを格納する配列
-            let isShortcircuit = false // 短絡手かどうか
-
-            // 計測開始
-            const start = performance.now()
-
-            // 子盤面を探索
-            for (let block of avairable(board)) {
-                scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], 1, Math.max(...scores)))
-            }
-
-            // 短絡手の実装
-            if (SHORTCIRCUIT && scores.every(score => score === scores[0])) {
-                isShortcircuit = true
-                scores = []
-                for (let block of avairable(board)) {
-                    scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], DEPTH, Math.max(...scores)))
-                }
-            }
-
-            // COMの手を選択
-            let goodCoodinate = avairable(board)[getMaxIndex(scores)]
-
-            // 石を置く
-            board[goodCoodinate["y"]][goodCoodinate["x"]] = { "soldier": "x", "owner": COM }
-
-            // 計測終了
-            const end = performance.now()
-
-            // 盤面UIを更新
-            document.getElementById("board").innerHTML = boardHTML(board)
-
-            // 棋譜を採る
-            if (RECORD) {
-                document.getElementById("record").innerHTML +=
-                    `<font color="red">COM ${goodCoodinate["x"]}${String.fromCharCode(goodCoodinate["y"] + "A".charCodeAt())}
-        ${(end - start).toFixed(2)}ms ${isShortcircuit ? "短絡手" : ""}</font><br>`
-            }
-
-            // 子盤面のスコア配列をコンソールに出力する
-            console.log(scores)
-
-            // 勝敗が決まった場合に知らせる
-            if (align(board, COM, LENGTH)) {
-                lose.showModal()
-                return 0
-            } else if (avairable(board).length === 0) {
-                draw.showModal()
-                return 0
-            }
-
-            // COMが探索するための想像コンピュータ
-            function imagedComupter(board, x, y, depth, parentMax) {
-
-                board[y][x] = { "soldier": "x", "owner": COM }
-                let blanks = avairable(board)
-                let scores = []
-
-                // 勝利条件を満たすとき
-                if (align(board, COM, LENGTH)) {
-                    return 1000 * (DEPTH - depth + 1)
-                }
-
-                // 探索の深さまたは全マスの埋まりを満たすとき
-                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
-
-                // 子盤面の探索
-                for (let block of blanks) {
-                    let score = imagedPlayer(structuredClone(board), block["x"], block["y"], depth + 1, Math.min(...scores))
-                    if (score <= parentMax && ALPHABETA) {
-                        // αカット
-                        return score
-                    } else {
-                        scores.push(score)
-                    }
-                }
-                return Math.min(...scores)
-            }
-
-            // COMが探索するための想像プレイヤー
-            function imagedPlayer(board, x, y, depth, parentMin) {
-
-                board[y][x] = { "soldier": "o", "owner": PLAYER }
-                let blanks = avairable(board)
-                let scores = []
-
-                // 勝利条件を満たすとき
-                if (align(board, PLAYER, LENGTH)) {
-                    return -1000 * (DEPTH - depth + 1)
-                }
-
-                // 探索の深さまたは全マスの埋まりを満たすとき
-                if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
-
-                // 子盤面の探索
-                for (let block of blanks) {
-                    let score = imagedComupter(structuredClone(board), block["x"], block["y"], depth + 1, Math.max(...scores))
-                    if (parentMin <= score && ALPHABETA) {
-                        // βカット
-                        return score
-                    } else {
-                        scores.push(score)
-                    }
-                }
-                return Math.max(...scores)
-            }
-        }
-
 
         /*
-        思考するコンピュータ
-        */
+         * 思考するコンピュータ
+         */
         function compter() {
 
-            let gametree = `<ul class="construction"><li>${boardHTML(board)}` // ゲーム木を表現するHTMLを格納する
-            let getMaxIndex = arr => arr.indexOf(Math.max(...arr)) // 最大値のインデックスを返す関数
-            let scores = [] // 子盤面のスコアを格納する配列
-            let isShortcircuit = false // 短絡手かどうか
+            let gametree = `<ul class="construction"><li>${boardHTML(board)}`   // ゲーム木を表現するHTMLを格納する
+            let getMaxIndex = arr => arr.indexOf(Math.max(...arr))              // 最大値のインデックスを返す関数
+            let scores = []             // 子盤面のスコアを格納する配列
+            let isShortcircuit = false  // 短絡手かどうか
 
             // 計測開始
             const start = performance.now()
 
-            gametree += `<ul>`
+            if (DEBUG) gametree += `<ul>`
             // 子盤面を探索
             for (let block of avairable(board)) {
                 scores.push(imagedComupter(structuredClone(board), block["x"], block["y"], 1, Math.max(...scores)))
             }
-            gametree += `</ul></li><ul>`
+            if (DEBUG) gametree += `</ul></li><ul>`
 
             // 短絡手の実装
             if (SHORTCIRCUIT && scores.every(score => score === scores[0])) {
@@ -384,89 +295,122 @@
 
             // 勝敗が決まった場合に知らせる
             if (align(board, COM, LENGTH)) {
-                alert("あなたの 負け")
+                lose.showModal()
                 return 0
             } else if (avairable(board).length === 0) {
-                alert("引き分け")
+                draw.showModal()
                 return 0
             }
 
             // COMが探索するための想像コンピュータ
             function imagedComupter(board, x, y, depth, parentMax) {
 
-                board[y][x] = { "soldier": "x", "owner": COM }
-                let blanks = avairable(board)
-                let scores = []
+                board[y][x] = { "soldier": "x", "owner": COM } // 石を置く
+                let blanks = avairable(board) // 石を配置可能な盤を得る
+                let scores = [] // 子盤面のスコアを格納
 
                 // 勝利条件を満たすとき
                 if (align(board, COM, LENGTH)) {
-                    gametree += `<li>${boardHTML(board)}COM勝利</li>`
+                    if (DEBUG) gametree += `<li>${boardHTML(board)}COM勝利</li>`
                     return 1000 * (DEPTH - depth + 1)
                 }
 
                 // 探索の深さまたは全マスの埋まりを満たすとき
                 if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
 
-                gametree += `<li>${boardHTML(board)}</li>`
-                gametree += `<ul>`
+                if (DEBUG) gametree += `<li>${boardHTML(board)}</li>`
+                if (DEBUG) gametree += `<ul>`
 
                 // 子盤面の探索
                 for (let block of blanks) {
+
                     let score = imagedPlayer(structuredClone(board), block["x"], block["y"], depth + 1, Math.min(...scores))
+
                     if (score <= parentMax && ALPHABETA) {
                         // αカット
-                        gametree += `</ul>`
+                        if (DEBUG) gametree += `</ul>`
                         return score
                     } else {
                         scores.push(score)
                     }
                 }
-                gametree += `</ul>`
+                if (DEBUG) gametree += `</ul>`
                 return Math.min(...scores)
             }
 
             // COMが探索するための想像プレイヤー
             function imagedPlayer(board, x, y, depth, parentMin) {
 
-                board[y][x] = { "soldier": "o", "owner": PLAYER }
-                let blanks = avairable(board)
-                let scores = []
+                board[y][x] = { "soldier": "o", "owner": PLAYER } // 石を置く
+                let blanks = avairable(board) // 石を配置可能な盤を得る
+                let scores = [] // 子盤面のスコアを格納
 
                 // 勝利条件を満たすとき
                 if (align(board, PLAYER, LENGTH)) {
-                    gametree += `<li>${boardHTML(board)}PLAYER勝利</li>`
+                    if (DEBUG) gametree += `<li>${boardHTML(board)}PLAYER勝利</li>`
                     return -1000 * (DEPTH - depth + 1)
                 }
 
                 // 探索の深さまたは全マスの埋まりを満たすとき
                 if (DEPTH <= depth || blanks.length === 0) return evaluate(board)
 
-                gametree += `<li>${boardHTML(board)}</li>`
-                gametree += `<ul>`
+                if (DEBUG) gametree += `<li>${boardHTML(board)}</li>`
+                if (DEBUG) gametree += `<ul>`
                 // 子盤面の探索
                 for (let block of blanks) {
                     let score = imagedComupter(structuredClone(board), block["x"], block["y"], depth + 1, Math.max(...scores))
+
                     if (parentMin <= score && ALPHABETA) {
                         // βカット
-                        gametree += `</ul>`
+                        if (DEBUG) gametree += `</ul>`
                         return score
                     } else {
                         scores.push(score)
                     }
                 }
-                gametree += `</ul>`
+                if (DEBUG) gametree += `</ul>`
                 return Math.max(...scores)
             }
         }
 
+        /**
+         * そこがどれほど戦場かを示す値を返す．大きいほど戦場ではない
+         *
+         * @param {*} board 盤面を表現する配列
+         * @param {*} x 評価するマスのx座標
+         * @param {*} y 評価するマスのy座標
+         * @param {*} maxExtent 走査の広さの上限
+         */
+        function battlefield(board, x, y, maxExtent) {
+            let extent = 0
+            while (extent <= maxExtent) {
+                for (let k = x - extent; k <= x + extent; k++) {
+                    for (let l = y - extent; l <= y + extent; l++) {
+                        if (0 <= k && k < board[0].length && 0 <= l && l < board.length) {
+                            if (board[l][k]["owner"] !== null) {
+                                return extent
+                            }
+                        }
+                    }
+                }
+                extent += 1
+            }
+            return maxExtent + 1
+        }
+
+
         /*
-        盤面中でlen個以上並んでいるchallengerの個数を返す
-        */
+         * 盤面中でlen個以上並んでいるchallengerの個数を返す
+         *
+         * @param {*} board 盤面を表現する配列
+         * @param {*} challenger マスの所有者
+         * @param {*} len マスの空間的な連続の所有をカウントするときの，連続数の下限
+         */
         function align(board, challenger, len) {
 
             let countSequence = (arr, n) => {
-                let maxLength = 0
-                let nowLength = 0
+                let maxLength = 0 // 発見された最大の長さ
+                let nowLength = 0 // 現在の長さ
                 for (let item of arr) {
                     if (item["owner"] === n) {
                         nowLength += 1
@@ -480,9 +424,7 @@
                 return maxLength
             }
 
-
-
-            let combination = 0
+            let combination = 0 // 発見されたマスの空間的な連続の所有の個数
 
             // 横の揃い
             for (let row of board) {
@@ -491,7 +433,11 @@
                 }
             }
 
-            // 縦の揃い
+            /**
+             * 行列を転置する
+             *
+             * @param {*} arr2d 転置する二次元配列
+             */
             let transpose = arr2d => {
                 t = Array.from(new Array(arr2d[0].length), () => Array.from(new Array(arr2d.length), () => null))
                 arr2d.forEach((row, y) => {
@@ -502,13 +448,18 @@
                 return t
             }
 
+            // 縦の揃い
             for (let col of transpose(board)) {
                 if (len <= countSequence(col, challenger)) {
                     combination += 1
                 }
             }
 
-            // 斜めに存在している要素を切り出す．
+            /**
+             * 斜めに存在している要素を切り出す．
+             *
+             * @param {*} array2d 切り出す二次元配列
+             */
             let diag = array2d => {
 
                 // 配列の左下から左上を経由して右上に向かって存在する要素番号を返す．
@@ -552,11 +503,21 @@
             return combination
         }
 
-        /*
-        盤面においてchallengerのリーチ(len個並んだ状態)の個数を返す
-        */
+        /**
+         * 盤面においてchallengerの広義のリーチ(len個並んだ状態)の個数を返す
+         * 広義のリーチとは誰も所有していないマスを含んだchallengerの石の並びを指す
+         *
+         * @param {*} board 盤面を表現する配列
+         * @param {*} challenger カウント対象とするマスの所有者
+         * @param {*} len マスの空間的な連続の所有をカウントするときの，連続数の下限
+         */
         function reach(board, challenger, len) {
-
+            /**
+             * 与えられた盤面のある一列について，広義のリーチの最大長を返す
+             *
+             * @param {*} arr 盤面のある一列
+             * @param {*} challenger カウント対象とするマスの所有者
+             */
             let countSequence = (arr, challenger) => {
                 let maxLength = 0
                 let nowLength = 0
@@ -611,7 +572,10 @@
                 }
             }
 
-            // 斜めに存在している要素を切り出す．
+            /** 斜めに存在している要素を切り出す．
+             *
+             * @param {*} array2d 切り出す対象とする二次元配列
+             */
             let diag = array2d => {
 
                 // 配列の左下から左上を経由して右上に向かって存在する要素番号を返す．
@@ -654,7 +618,11 @@
 
             return combination
         }
-        /* COMにとってどれほど有利か */
+        /**
+         * COMにとってどれほど有利か
+         *
+         * @param {*} board 盤面を表現する配列
+         */
         function evaluate(board) {
             return reach(board, COM, LENGTH - 1) * 10 - reach(board, PLAYER, LENGTH - 1) * 10
         }
