@@ -1,0 +1,134 @@
+<html>
+	<head>
+		<meta cherset="UTF-8">
+		<style>
+			.button {
+				width: 100px;
+				height: 100px;
+				font-size: 30px;
+			}
+		</style>
+	</head>
+	<body>
+	<div style="font-size: 40px;">RPN STACK</div>
+	<div id="formula" style="font-size: 40px;">|</div>
+	<div id="calc" style="font-size: 40px;">|</div>
+	<input type="button" value="AC" class="button" onclick="put('AC')">
+	<input type="button" value="+/-" class="button" onclick="put('+/-')">
+	<input type="button" value="//" class="button" onclick="put('//')">
+	<input type="button" value="%" class="button" onclick="put('%')">
+	<br>
+	<input type="button" value="7" class="button" onclick="put('7')">
+	<input type="button" value="8" class="button" onclick="put('8')">
+	<input type="button" value="9" class="button" onclick="put('9')">
+	<input type="button" value="**" class="button" onclick="put('**')">
+	<br>
+	<input type="button" value="4" class="button" onclick="put('4')">
+	<input type="button" value="5" class="button" onclick="put('5')">
+	<input type="button" value="6" class="button" onclick="put('6')">
+	<input type="button" value="*" class="button" onclick="put('*')">
+	<br>
+	<input type="button" value="1" class="button" onclick="put('1')">
+	<input type="button" value="2" class="button" onclick="put('2')">
+	<input type="button" value="3" class="button" onclick="put('3')">
+	<input type="button" value="-" class="button" onclick="put('-')">
+	<br>
+	<input type="button" value="0" class="button" onclick="put('0')">
+	<input type="button" value="BLK" class="button" onclick="put('BLK')">
+	<input type="button" value="=" class="button" onclick="put('=')">
+	<input type="button" value="+" class="button" onclick="put('+')">
+<script>
+// ユーザーがBLKで数字を区切るまで一時的に記憶する変数
+let tmp = "";
+// ユーザーの入力が格納されるスタック
+let formula = [];
+
+function calculate() {
+	
+	// 計算用スタック、formulaスタックを順次ここに移し替えながら計算。
+	let calc = [];
+	
+	let timer = setInterval(() => {
+		if (1 <= formula.length) {
+			let elm = formula.shift();
+			
+			if(typeof elm === "bigint") {
+			// 数だったら
+			
+				calc.push(elm);
+				// formulaスタックからcalcスタックに移し替える
+				
+			} else {
+			// 演算子だったら
+			
+				if(calc.length < 2){
+				// 被演算子が2つよりすくなかったら
+				
+					alert("記法の誤りが存在します。"); return -1;
+					return -1;
+				} else {
+					
+					// calcスタックから二つ取り出して計算する
+					operand1 = calc.pop();
+					operand2 = calc.pop();
+					
+					switch(elm){
+						case "+":	calc.push(operand2 + operand1); break;
+						case "-":	calc.push(operand2 - operand1); break;
+						case "*":	calc.push(operand2 * operand1); break;
+						case "//":	calc.push(operand2 / operand1); break;
+						case "%":	calc.push(operand2 % operand1); break;
+						case "**":	calc.push(operand2 ** operand1); break;
+						default: alert("記法の誤りが存在します"); return -1;
+					}
+				}
+			}
+			document.getElementById("formula").innerHTML = formula.join(", ")
+			document.getElementById("calc").innerHTML = `${calc}`;
+		} else {
+			clearInterval(timer);
+		}
+	}, 500);
+}
+
+function put(i) {
+	if (i === "+/-"){
+		tmp === "" ? "" : tmp *= -1; // 符号反転、ただしtmpが空の文字列だったら、中身を変えない
+	
+	} else if(i === "BLK") {
+		formula.push(tmp); // 数字を区切る
+		tmp = "";
+	} else if(i === "=") {
+		put("BLK");
+		formula.forEach((e, i) => {
+			if(!["+", "-", "*", "//", "%", "**"].includes(e)){
+				formula[i] = BigInt(formula[i]);
+			}
+		});
+		calculate();
+	} else if(i === "AC") {
+		tmp = "";
+		formula = [];
+	} else if(["+", "-", "*", "//", "%", "**"].includes(i)) {
+	// iが演算子だったら
+		if(tmp !== "") {
+		// tmpが空の文字列ではなかったら
+			put("BLK");
+		}
+		tmp += i;
+	} else {
+	// iがオペランドだったら
+		if(["+", "-", "*", "//", "%", "**"].includes(tmp)) {
+		// tmpに演算子が入っていたら
+			put("BLK");
+		}
+		// オペランドの文字列または、オペレーターの文字列を加える
+		tmp += i;
+	}
+	
+	document.getElementById("formula").innerHTML = formula.join(", ") + `${formula.length === 0 ? "" : ","} ${tmp}|`;
+}
+</script>
+
+	</body>
+</html>
